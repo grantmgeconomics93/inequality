@@ -1,0 +1,4 @@
+---
+title: "inequality"
+output: "git_hubdoc"
+---
