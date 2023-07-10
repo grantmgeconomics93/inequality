@@ -1,4 +1,216 @@
 ---
 title: "inequality"
-output: "git_hubdoc"
+output: "github_doc"
 ---
+```{r}
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(zoo)
+library(readr)
+library(tidyverse)
+```
+
+```{r}
+  library(readxl)
+female_ed <- read_excel("femaleeducationalattainment.xls")
+View(female_ed)
+
+growthrates <- read_excel("growthrateswb.xlsx")
+View(growthrateswb)
+male_ed<- read_excel("maleeducationalattainment .xlsx")
+View(male_ed)
+inequality_=read_excel("inequality .xlsx")
+
+pwt56_forweb <- read_excel("pwt56_forweb.xls")
+View(pwt56_forweb)
+ gdppcatlas <- read_excel("GNI per capita, Atlas method (current US$).xlsx")
+ View(gdppcatlas)
+
+
+```
+```{r}
+ gdppcatlas$`Country Code`=NULL
+gdppcatlas$`Indicator Name`=NULL
+gdppcatlas$`Indicator Code`=NULL
+```
+
+```{r}
+ growthrates$`Country Code`=NULL
+ growthrates$`Indicator Code`=NULL
+ growthrates$`Indicator Name`=NULL
+```
+
+```{r}
+# Apply the pivot_longer function
+growthrates<- growthrates %>%
+  pivot_longer(cols = -`Country Name`,  # select all columns except the 'country' column
+               names_to = "year",
+               values_to = "growth")
+
+growthrates<- growthrates[!is.na(growthrates$growth), ]
+```
+```{r}
+
+
+# Apply the pivot_longer function
+ gdppcatlas<- gdppcatlas %>%
+  pivot_longer(cols = -`Country Name`,  # select all columns except the 'country' column
+               names_to = "year",
+             values_to = "income")
+
+# Convert the year column to numeric
+gdppcatlas<- gdppcatlas[!is.na(gdppcatlas$income ), ]
+
+
+
+```
+
+```{r}
+inequality_=inequality_%>%filter(Year>1954 &Year<1996)
+```
+```{r}
+# Convert non-numeric entries in a specific column (say, 'Income') to NA
+inequality_$Gini<- as.numeric(inequality_$Gini)
+
+# Filter out rows with NA in 'Income'
+inequality_<- inequality_[!is.na(inequality_$Gini), ]
+
+```
+```{r}
+
+# Define function
+#filter_data <- function(inequality_) {
+ # if (any(inequality_$Quality == "accept")) {
+  #  return(inequality_ %>% filter(Quality == "accept"))
+ # } else if (any(inequality_$Quality == "nn")) {
+  #  return(inequality_ %>% filter(Quality == "nn"))
+#  } else {
+ #   return(data.frame())  # Return empty dataframe when neither 'a  accept' nor 'nn' are found
+  #}
+#}
+
+# Use function
+#inequality_<- inequality_ %>% 
+ # group_by(Country, Year) %>%
+  #do(filter_data(.)) %>%
+  #filter(length(Quality) > 0)  # Remove groups that are empty
+
+```
+
+```{r}
+# Group by 'country', arrange by 'year', calculate 5-year average for 'Income', and select the necessary columns
+df_5yr_avg <- inequality_ %>%
+  group_by(Country) %>%
+  arrange(Year) %>%
+  mutate(inequality_5yr_avg = rollapply(Gini, width = 5, FUN = mean, align = "right", fill = NA)) %>%
+  select(Country, Year, inequality_5yr_avg)
+```
+```{r}
+df_5yr_avg <- df_5yr_avg[grepl("[05]$", df_5yr_avg$Year), ]%>%na.omit()
+```
+```{r}
+pwt56_forweb = pwt56_forweb %>%
+  mutate(Country = tolower(Country))
+
+```
+
+```{r}
+df_5yr_avg = df_5yr_avg %>%
+  mutate(Country = tolower(Country))
+invstplusineqalty= merge(df_5yr_avg, pwt56_forweb, by = c("Country", "Year"))%>%na.omit()
+
+```
+
+```{r}
+# assuming 'df' is your data frame
+female_ed <- female_ed[rowSums(is.na(female_ed)) != ncol(female_ed),]
+male_ed <- male_ed[rowSums(is.na(male_ed)) != ncol(male_ed),]
+
+```
+```{r}
+female_ed=female_ed%>%fill(Country)
+male_ed=male_ed%>%fill(Country)
+```
+```{r}
+
+# Adding a 'gender' column to each dataframe
+female_ed$gender <- 'female'
+male_ed$gender <- 'male'
+
+
+
+# Binding rows from both dataframes
+geneduc_panel <- bind_rows(female_ed, male_ed)
+
+
+```
+```{r}
+
+
+# Convert the 'Country' values to lower case and remove leading and trailing white spaces in both dataframes'
+colnames(growthrates)[1]="Country"
+geneduc_panel$Country <- trimws(tolower(geneduc_panel$Country))
+invstplusineqalty$Country <- trimws(tolower(invstplusineqalty$Country))
+
+# Merge the dataframes
+stage1 <- merge(geneduc_panel, invstplusineqalty, by = "Country")
+
+# Check the merged dataframe
+head(stage1)
+
+```
+```{r}
+# Convert the 'Country' values to lower case and remove leading and trailing white spaces in both dataframes
+growthrates$Country <- trimws(tolower(growthrates$Country))
+colnames(gdppcatlas)[1]="Country"
+gdppcatlas$Country <- trimws(tolower(gdppcatlas$Country))
+
+# Merge the dataframes
+stage2 <- merge(x = growthrates,y =  gdppcatlas,by.x =  c("Country","Year"), by.y = c("Country","Year"))
+
+# Check the merged dataframe
+head(stage2)
+```
+
+```{r}
+final<- merge(stage1, stage2, by = "Country")
+```
+
+```{r}
+# Fit a fixed effects model with time and country fixed effects
+model <- plm(Growth ~ lag(Inequality, 1) + lag(Income, 1) + lag(MaleEducation, 1) + 
+             lag(FemaleEducation, 1) + lag(PPPI, 1), 
+             data = pdata, model = "within", effect = "twoways")
+
+# Extract coefficients and covariance matrix
+coef_est <- coef(model)
+vcov_est <- vcov(model)
+
+# Compute standard errors
+se_est <- sqrt(diag(vcov_est))
+
+# Compute 95% confidence intervals
+conf_int <- cbind(coef_est - 1.96*se_est, coef_est + 1.96*se_est)
+colnames(conf_int) <- c("Lower", "Upper")
+
+# Display the confidence intervals
+print(conf_int)
+```
+
+```{r}
+# Assuming 'time' is the name of your time variable
+T <- max(pdata$time)
+
+# Fit a GMM model
+model_gmm <- pgmm(Growth ~ lag(Inequality, 1) + lag(Income, 1) + lag(MaleEducation, 1) + 
+                  lag(FemaleEducation, 1) + lag(PPPI, 1) | 
+                  lag(Inequality, 2:T) + lag(Income, 2:T) + lag(MaleEducation, 2:T) +
+                  lag(FemaleEducation, 2:T) + lag(PPPI, 2:T),
+                  data = pdata, effect = "individual", model = "fd")
+
+```
+
+
+
+
