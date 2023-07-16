@@ -3,12 +3,15 @@ title: "inequality"
 output: "github_doc"
 ---
 ```{r}
-library(readxl)
 library(dplyr)
 library(tidyr)
 library(zoo)
+library(car)
 library(readr)
+library(fastDummies)
 library(tidyverse)
+library(plm)
+library(vars)
 ```
 
 ```{r}
@@ -20,16 +23,36 @@ growthrates <- read_excel("growthrateswb.xlsx")
 View(growthrateswb)
 male_ed<- read_excel("maleeducationalattainment .xlsx")
 View(male_ed)
-inequality_=read_excel("inequality .xlsx")
-
-pwt56_forweb <- read_excel("pwt56_forweb.xls")
-View(pwt56_forweb)
+library(readxl)
+inequality_ <- read_excel("pip.xlsx")
+View(inequality_)
+ 
+pwt90 <- read_excel("pwt90.xlsx")
+ View(pwt90)
  gdppcatlas <- read_excel("GNI per capita, Atlas method (current US$).xlsx")
- View(gdppcatlas)
+ View(income)
 
 
 ```
+
 ```{r}
+# Converting the 'country' column to lower case in 'pwt90' dataframe
+
+pwt90=pwt90%>%mutate(country = tolower(country))
+```
+
+```{r}
+# Grouping by 'country', arranging by 'year', and selecting relevant columns in 'pl_i'
+
+pl_i <- pwt90%>%dplyr::select(country, year, pl_i )
+#remove duplicate and NAs
+pl_i<-pl_i[!is.na(pl_i$pl_i), ]
+pi_i=pl_i[!duplicated(pl_i),]
+
+```
+
+```{r}
+#remove unnecessary roomrows 
  gdppcatlas$`Country Code`=NULL
 gdppcatlas$`Indicator Name`=NULL
 gdppcatlas$`Indicator Code`=NULL
@@ -47,80 +70,60 @@ growthrates<- growthrates %>%
   pivot_longer(cols = -`Country Name`,  # select all columns except the 'country' column
                names_to = "year",
                values_to = "growth")
-
+#remove NAS
 growthrates<- growthrates[!is.na(growthrates$growth), ]
 ```
+```{r}
+#smooth growth rates to 3 year average make new df
+df_3yr_avggrowth   <- growthrates%>%
+  group_by(`Country Name`) %>%
+  arrange(year) %>%
+  mutate(growth_3yr_growth  = rollapply(growth, width = 3, FUN = mean, align = "right", fill = NA)) %>%
+  dplyr::select(`Country Name`, year, growth_3yr_growth )
+#remove duplicates and NAs
+df_3yr_avggrowth<-df_3yr_avggrowth[!is.na(df_3yr_avggrowth$growth_3yr_growth), ]
+df_3yr_avggrowth=df_3yr_avggrowth[!duplicated(df_3yr_avggrowth),]
+
+```
+```{r}
+# Group by 'country', arrange by 'year',  get the years in the right time frame 
+inequality_2=inequality_%>%filter(reporting_year>1979 &reporting_year<2015)
+gini  <- inequality_2 %>% 
+  group_by(country_name) %>%
+  arrange(reporting_year) %>%
+  mutate(gini  = gini) %>%
+  dplyr::select(country_name, reporting_year, gini )
+gini<-gini[!is.na(gini$gini), ]
+
+
+```
+
+
 ```{r}
 
 
 # Apply the pivot_longer function
- gdppcatlas<- gdppcatlas %>%
+ income <- gdppcatlas %>%
   pivot_longer(cols = -`Country Name`,  # select all columns except the 'country' column
                names_to = "year",
              values_to = "income")
 
 # Convert the year column to numeric
-gdppcatlas<- gdppcatlas[!is.na(gdppcatlas$income ), ]
+income<- income[!is.na(income$income ), ]
+
 
 
 
 ```
+
+
 
 ```{r}
-inequality_=inequality_%>%filter(Year>1954 &Year<1996)
-```
-```{r}
-# Convert non-numeric entries in a specific column (say, 'Income') to NA
-inequality_$Gini<- as.numeric(inequality_$Gini)
-
-# Filter out rows with NA in 'Income'
-inequality_<- inequality_[!is.na(inequality_$Gini), ]
-
-```
-```{r}
-
-# Define function
-#filter_data <- function(inequality_) {
- # if (any(inequality_$Quality == "accept")) {
-  #  return(inequality_ %>% filter(Quality == "accept"))
- # } else if (any(inequality_$Quality == "nn")) {
-  #  return(inequality_ %>% filter(Quality == "nn"))
-#  } else {
- #   return(data.frame())  # Return empty dataframe when neither 'a  accept' nor 'nn' are found
-  #}
-#}
-
-# Use function
-#inequality_<- inequality_ %>% 
- # group_by(Country, Year) %>%
-  #do(filter_data(.)) %>%
-  #filter(length(Quality) > 0)  # Remove groups that are empty
-
+female_ed=female_ed%>%fill(Country)
+male_ed=male_ed%>%fill(Country)
 ```
 
-```{r}
-# Group by 'country', arrange by 'year', calculate 5-year average for 'Income', and select the necessary columns
-df_5yr_avg <- inequality_ %>%
-  group_by(Country) %>%
-  arrange(Year) %>%
-  mutate(inequality_5yr_avg = rollapply(Gini, width = 5, FUN = mean, align = "right", fill = NA)) %>%
-  select(Country, Year, inequality_5yr_avg)
-```
-```{r}
-df_5yr_avg <- df_5yr_avg[grepl("[05]$", df_5yr_avg$Year), ]%>%na.omit()
-```
-```{r}
-pwt56_forweb = pwt56_forweb %>%
-  mutate(Country = tolower(Country))
 
-```
-
-```{r}
-df_5yr_avg = df_5yr_avg %>%
-  mutate(Country = tolower(Country))
-invstplusineqalty= merge(df_5yr_avg, pwt56_forweb, by = c("Country", "Year"))%>%na.omit()
-
-```
 
 ```{r}
 # assuming 'df' is your data frame
@@ -128,20 +131,30 @@ female_ed <- female_ed[rowSums(is.na(female_ed)) != ncol(female_ed),]
 male_ed <- male_ed[rowSums(is.na(male_ed)) != ncol(male_ed),]
 
 ```
+
 ```{r}
-female_ed=female_ed%>%fill(Country)
-male_ed=male_ed%>%fill(Country)
-```
-```{r}
+#rename education variable to match
+ female_ed <- rename(female_ed, "Avg. Years of Secondary Schooling F" = "Avg. Years of Secondary Schooling")
+male_ed <- rename(male_ed, "Avg. Years of Secondary Schooling M" = "Avg. Years of Secondary Schooling")
 
-# Adding a 'gender' column to each dataframe
-female_ed$gender <- 'female'
-male_ed$gender <- 'male'
+#merge to
+
+merged_educ <- merge(female_ed[c("Country", "Year", "Region", "Avg. Years of Secondary Schooling F")], 
+                   male_ed[c("Country", "Year", "Region", "Avg. Years of Secondary Schooling M")], 
+                   by = c("Country", "Year", "Region"))
+# Remove rows where 'Year' is NA
+ merged_educ <- merged_educ %>%
+    drop_na(Year)
 
 
+# Assuming df is your data frame and 'Year' is the column with the years
 
-# Binding rows from both dataframes
-geneduc_panel <- bind_rows(female_ed, male_ed)
+# Assuming df is your data frame, 'Year' is the column with the years, and 'Country' is the column with the countries
+merged_educ <- merged_educ %>%
+  group_by(Country) %>%
+  complete(Year = min(Year):max(Year)) %>%
+  fill(everything(), .direction = "down") %>%
+  ungroup()
 
 
 ```
@@ -149,40 +162,80 @@ geneduc_panel <- bind_rows(female_ed, male_ed)
 
 
 # Convert the 'Country' values to lower case and remove leading and trailing white spaces in both dataframes'
-colnames(growthrates)[1]="Country"
-geneduc_panel$Country <- trimws(tolower(geneduc_panel$Country))
-invstplusineqalty$Country <- trimws(tolower(invstplusineqalty$Country))
+colnames(income)[1]="Country"
 
+colnames(merged_educ)[1]="Country"
+colnames(merged_educ)[2]="year"
 # Merge the dataframes
-stage1 <- merge(geneduc_panel, invstplusineqalty, by = "Country")
+stage1 <- merge(merged_educ, income, by = c("Country","year"))
 
 # Check the merged dataframe
 head(stage1)
 
 ```
 ```{r}
-# Convert the 'Country' values to lower case and remove leading and trailing white spaces in both dataframes
-growthrates$Country <- trimws(tolower(growthrates$Country))
-colnames(gdppcatlas)[1]="Country"
-gdppcatlas$Country <- trimws(tolower(gdppcatlas$Country))
+colnames(df_3yr_avggrowth)[1]="Country"
+colnames(gini)[1]="Country"
+colnames(gini)[2]="year"
+stage2=merge(df_3yr_avggrowth, gini, by = c("Country","year"))
+```
 
-# Merge the dataframes
-stage2 <- merge(x = growthrates,y =  gdppcatlas,by.x =  c("Country","Year"), by.y = c("Country","Year"))
 
-# Check the merged dataframe
-head(stage2)
+```{r}
+colnames(stage1)[2]="year"
+
+stage3<- merge(stage1, stage2, by = c("Country","year"))
+```
+```{r}
+colnames(pl_i)[1]="Country"
+
+stage3$Country <- tolower(stage3$Country)
+final<- merge(stage3, pl_i, by = c("Country","year"))
+final <- final[!duplicated(final[c('Country', 'year')]), ]
 ```
 
 ```{r}
-final<- merge(stage1, stage2, by = "Country")
+#make region dummies 
+final=dummy_cols(final,select_columns = "Region",remove_first_dummy = T)
 ```
+```{r}
+# Dummies for time periods 
+final$period_dummy_1980s <- ifelse(final$year >= 1980 & final$year < 1989, 1, 0)
+
+final$period_dummy_1990s <- ifelse(final$year >= 1990 & final$year < 1999, 1, 0)
+final$period_dummy_2000s <- ifelse(final$year >= 2000 & final$year < 2010, 1, 0)
+final$period_dummy_2010s <- ifelse(final$year >= 2010 , 1, 0)
+
+```
+```{r}
+# Make gini out of 100
+final$gini=100*final$gini
+```
+
+```{r}
+pdata <- pdata.frame(final, index = c("Country", "year"))
+
+
+```
+```{r}
+pdata <- pdata[order(pdata$Country, pdata$year), ]
+
+# Filter out countries with only one occurrence
+pdata <- pdata %>%
+  group_by(Country) %>%
+  filter(n() > 1)
+
+```
+
+
 
 ```{r}
 # Fit a fixed effects model with time and country fixed effects
-model <- plm(Growth ~ lag(Inequality, 1) + lag(Income, 1) + lag(MaleEducation, 1) + 
-             lag(FemaleEducation, 1) + lag(PPPI, 1), 
+model <- plm(growth_3yr_growth ~ lag(gini, 1) +inc #lag(log(income), 1) + lag(Avg..Years.of.Secondary.Schooling.M, 1) + 
+             #lag(Avg..Years.of.Secondary.Schooling.F, 1)
+           # + lag(pl_i,1)
+            +Region_East.Asia.and.the.Pacific+Region_Europe.and.Central.Asia+Region_Latin.America.and.the.Caribbean+Region_Middle.East.and.North.Africa+Region_South.Asia+Region_Sub.Saharan.Africa+period_dummy_1980s+period_dummy_1990s+period_dummy_2000s, 
              data = pdata, model = "within", effect = "twoways")
-
 # Extract coefficients and covariance matrix
 coef_est <- coef(model)
 vcov_est <- vcov(model)
@@ -191,23 +244,57 @@ vcov_est <- vcov(model)
 se_est <- sqrt(diag(vcov_est))
 
 # Compute 95% confidence intervals
-conf_int <- cbind(coef_est - 1.96*se_est, coef_est + 1.96*se_est)
-colnames(conf_int) <- c("Lower", "Upper")
+conf_int1 <- cbind(coef_est - 1.96*se_est, coef_est, coef_est + 1.96*se_est)
 
-# Display the confidence intervals
-print(conf_int)
+# Convert conf_int1 to a dataframe and set column names
+conf_int1_df <- as.data.frame(conf_int1)
+colnames(conf_int1_df) <- c("Lower", "Coef", "Upper")
+
+# Print the dataframe
+print(conf_int1_df)
+
+
 ```
+```{r}
+# Create a new data frame with lagged variables
+new_pdata <- pdata
+new_pdata$lag_gini <- lag(pdata$gini, 1)
+new_pdata$lag_log_income <- lag(log(pdata$income), 1)
+new_pdata$lag_Avg_Years_of_Secondary_Schooling_M <- lag(pdata$Avg..Years.of.Secondary.Schooling.M, 1)
+new_pdata$lag_Avg_Years_of_Secondary_Schooling_F <- lag(pdata$Avg..Years.of.Secondary.Schooling.F, 1)
+new_pdata$lag_pl_i <- lag(pdata$pl_i, 1)
+# Fit an lm model
+model_lm <- lm(growth_3yr_growth ~ lag_gini + lag_log_income + lag_Avg_Years_of_Secondary_Schooling_M + 
+               lag_Avg_Years_of_Secondary_Schooling_F + lag_pl_i + Region_East.Asia.and.the.Pacific + 
+               Region_Europe.and.Central.Asia + Region_Latin.America.and.the.Caribbean + 
+               Region_Middle.East.and.North.Africa + Region_South.Asia + Region_Sub.Saharan.Africa + 
+               period_dummy_1980s + period_dummy_1990s + period_dummy_2000s, 
+               data = new_pdata)
+
+# Remove rows with NA values (which were introduced by the lag function)
+new_pdata <- na.omit(new_pdata)
+vif(model_lm)
+
+```
+
+```{r}
+data <- final[, c("growth_3yr_growth", "gini", "income", "Avg. Years of Secondary Schooling M", "Avg. Years of Secondary Schooling F", "pl_i", "Region_East Asia and the Pacific", "Region_Europe and Central Asia", "Region_Latin America and the Caribbean", "Region_Middle East and North Africa", "Region_South Asia", "Region_Sub-Saharan Africa", "period_dummy_1980s", "period_dummy_1990s", "period_dummy_2000s")]
+
+lag.select <- VARselect(data, lag.max = 10, type = "const")
+
+
+```
+
+
+
 
 ```{r}
 # Assuming 'time' is the name of your time variable
 T <- max(pdata$time)
 
-# Fit a GMM model
-model_gmm <- pgmm(Growth ~ lag(Inequality, 1) + lag(Income, 1) + lag(MaleEducation, 1) + 
-                  lag(FemaleEducation, 1) + lag(PPPI, 1) | 
-                  lag(Inequality, 2:T) + lag(Income, 2:T) + lag(MaleEducation, 2:T) +
-                  lag(FemaleEducation, 2:T) + lag(PPPI, 2:T),
-                  data = pdata, effect = "individual", model = "fd")
+# Fit a GMM model This is the problem 
+model_gmm <- pgmm(diff(growth_3yr_growth)~ diff(gini)|lag(gini,1),
+                  data = pdata, model = "twosteps", effect = "twoways" )
 
 ```
 
